@@ -1,0 +1,131 @@
+apply plugin: 'com.android.library'
+
+android {
+    compileSdkVersion 25
+    buildToolsVersion '25.0.0'
+
+    defaultConfig {
+        minSdkVersion 8
+        targetSdkVersion 25
+        versionCode 2
+        versionName "2.0"
+    }
+    buildTypes {
+        release {
+            minifyEnabled true
+            proguardFiles 'proguard-rules.pro'
+        }
+        //专门用来给CIS进行静态代码检查。必须不混淆，暂时和innerOssptest保持一致
+        noobfuscator {
+            minifyEnabled false
+            proguardFiles /*getDefaultProguardFile('proguard-android.txt'),*/ 'proguard-rules.pro'
+        }
+        //ci需要,
+        normal{
+            minifyEnabled true
+            proguardFiles /*getDefaultProguardFile('proguard-android.txt'),*/ 'proguard-rules.pro'
+        }
+        ossptest{
+            minifyEnabled false
+            proguardFiles /*getDefaultProguardFile('proguard-android.txt'),*/ 'proguard-rules.pro'
+        }
+    }
+
+    sourceSets {
+        main {
+            java.srcDirs = ['src/main/java']
+        }
+
+    }
+    customVersion()
+    customOutputJarDir()
+    createCopyJarTask()
+}
+
+dependencies {
+    compile fileTree(dir: 'libs', include: ['*.jar'])
+}
+
+
+def customVersion() {
+    logH1 "配置版本号信息"
+    if (project.hasProperty('versionCode')) {
+        project.android.defaultConfig.versionCode = project.versionCode.toInteger()
+        loginfo "customVersion versionCode=" + project.versionCode
+    } else {
+        loginfo "customVersion versionCode=null"
+    }
+    if (project.hasProperty('versionName')) {
+        project.android.defaultConfig.versionName = project.versionName
+        loginfo "customVersion versionName=" + project.versionName
+    } else {
+        loginfo "customVersion versionName=null"
+    }
+}
+
+def customOutputJarDir() {
+    logH1 "指定输出文件路径"
+    if (project.hasProperty('customOutputDirEnable')) {
+        loginfo "清除输出路径旧文件"
+        def outputFile = new File(project.getProjectDir().getPath()
+                + "/"
+                + project.outputJarDir)
+        outputFile.deleteDir()
+        outputFile.mkdir()
+    } else {
+        loginfo "无需清空旧文件"
+    }
+}
+
+
+def createCopyJarTask() {
+    logH1 "拷贝Jar"
+    def copyJarTask = project.tasks.create("copyJar")
+    project.android.libraryVariants.all { variant ->
+        variant.outputs.each { output ->
+
+            def copyJarVariantTask = project.tasks.create("copyJar${variant.name.capitalize()}", Copy)
+
+            def jarFromPath = project.getBuildDir().getPath() + "/intermediates/bundles/${variant.name}/classes.jar"
+            def jarIntoPath = project.getProjectDir().getPath() + "/" + project.outputJarDir;
+            loginfo "jar包拷贝地址:" + jarFromPath
+            loginfo "jar包输出路径:" + jarIntoPath
+
+            copyJarVariantTask.from(jarFromPath)
+            copyJarVariantTask.into(jarIntoPath)
+            copyJarVariantTask.rename('classes.jar', "DEBUGLOG_SDK-" + project.android.defaultConfig.versionName + "-${variant.name}.jar")
+
+            //拷贝mapping文件
+            if (variant.getBuildType().isMinifyEnabled()) {
+                def copyProguardMappingVariantTask = project.tasks.create("copyProguardMapping${variant.name.capitalize()}", Copy)
+
+                def fromPath = variant.mappingFile;
+                def intoPath = project.getProjectDir().getPath() + "/" + project.outputJarDir;
+                loginfo "输出路径" + intoPath
+
+                copyProguardMappingVariantTask.from(fromPath)
+                copyProguardMappingVariantTask.into(intoPath)
+                copyProguardMappingVariantTask.rename('mapping.txt', "mapping-${variant.name}.txt")
+
+                copyProguardMappingVariantTask.mustRunAfter copyJarVariantTask
+                copyJarTask.dependsOn copyProguardMappingVariantTask
+            }
+
+            copyJarVariantTask.mustRunAfter variant.assemble
+            copyJarTask.dependsOn copyJarVariantTask
+
+
+        }
+
+    }
+    loginfo "task 创建成功"
+}
+
+def logH1(String s) {
+    println ":" + project.name + ":" + "[" + s + "]"
+}
+
+def loginfo(String s) {
+    println "info-- " + s
+
+}
